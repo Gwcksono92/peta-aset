@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Asset Near Me</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 100vh; }
+
+    .popup-box {
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+      color: #333;
+    }
+
+    .popup-label {
+      font-weight: bold;
+      color: #666;
+    }
+
+    .popup-value {
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .popup-box a {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 6px 10px;
+      background: #0b5394;
+      color: white;
+      border-radius: 4px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    .dashboard {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 13px;
+      z-index: 999;
+      max-width: 90vw;
+    }
+
+    .dashboard-header {
+      font-weight: bold;
+      font-size: 15px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 4px;
+    }
+
+    .dashboard-content {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .dashboard-item {
+      background: #f0f0f0;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+    }
+
+    .color-box {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 6px;
+      border: 1px solid #999;
+    }
+
+    .legend {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .legend-item {
+      font-size: 12px;
+    }
+
+    .legend-title {
+      font-weight: bold;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="dashboard" id="dashboard">
+    <div class="dashboard-header" onclick="toggleDashboard()">📊 Ringkasan Aset (klik untuk tampil/sembunyi)</div>
+    <div id="dashboardBody">
+      <div class="dashboard-content" id="summaryContent">Memuat data...</div>
+      <div class="legend">
+        <div class="legend-title">Keterangan Warna:</div>
+        <div class="legend-item"><span class="color-box" style="background:green"></span> Digunakan</div>
+        <div class="legend-item"><span class="color-box" style="background:red"></span> Rusak Berat</div>
+        <div class="legend-item"><span class="color-box" style="background:yellow"></span> Rusak Ringan</div>
+        <div class="legend-item"><span class="color-box" style="background:deepskyblue"></span> Diperbaiki</div>
+        <div class="legend-item"><span class="color-box" style="background:orange"></span> Cadangan</div>
+        <div class="legend-item"><span class="color-box" style="background:gray"></span> Penghapusan</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    function toggleDashboard() {
+      const body = document.getElementById("dashboardBody");
+      body.style.display = body.style.display === "none" ? "block" : "none";
+    }
+
+    function toTitleCase(str) {
+      return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.slice(1).toLowerCase());
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const userLat = parseFloat(urlParams.get("lat"));
+    const userLng = parseFloat(urlParams.get("lng"));
+
+    const map = L.map('map', { zoomControl: false }).setView([userLat, userLng], 16);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map); // Zoom control di kiri bawah
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 22,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    L.circle([userLat, userLng], {
+      radius: 1000,
+      color: 'blue',
+      fillOpacity: 0.08
+    }).addTo(map);
+
+    const userIcon = L.divIcon({
+      html: '👤',
+      className: '',
+      iconSize: [24, 24]
+    });
+
+    L.marker([userLat, userLng], { icon: userIcon })
+      .addTo(map)
+      .bindPopup('<b>Lokasi Anda</b>')
+      .openPopup();
+
+    function getMarkerColor(condition) {
+      switch ((condition || "").toLowerCase()) {
+        case 'digunakan': return 'green';
+        case 'rusak berat': return 'red';
+        case 'rusak ringan': return 'yellow';
+        case 'diperbaiki': return 'deepskyblue';
+        case 'cadangan': return 'orange';
+        case 'penghapusan': return 'gray';
+        default: return 'gray';
+      }
+    }
+
+    function createColoredIcon(color) {
+      return new L.Icon({
+        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+      });
+    }
+
+    fetch(`https://asset-api-ef1w.onrender.com/nearme?lat=${userLat}&lng=${userLng}`)
+      .then(res => res.json())
+      .then(data => {
+        const summary = {};
+        const summaryContent = document.getElementById("summaryContent");
+        summaryContent.innerHTML = "";
+
+        let total = 0;
+
+        data.forEach(asset => {
+          const lat = parseFloat(asset.latitude);
+          const lng = parseFloat(asset.longitude);
+          const name = asset.asset_name || "No Name";
+          const lokasi = asset.location || "-";
+          const cc = asset.cost_center || "-";
+          const kondisiRaw = asset.condition || "-";
+          const kondisi = toTitleCase(kondisiRaw);
+
+          total++;
+          summary[kondisi] = (summary[kondisi] || 0) + 1;
+
+          const color = getMarkerColor(kondisiRaw);
+
+          if (!isNaN(lat) && !isNaN(lng)) {
+            const marker = L.marker([lat, lng], {
+              icon: createColoredIcon(color)
+            }).addTo(map);
+
+            const photoLinks = Object.keys(asset)
+              .filter(key => key.startsWith("photo_link") && asset[key])
+              .map(link => `<a href="${asset[link]}" target="_blank">📸 Lihat Foto</a>`).join("<br>");
+
+            const popupContent = `
+              <div class="popup-box">
+                <div class="popup-label">Nama Aset:</div>
+                <div class="popup-value"><b>${name}</b></div>
+                <div class="popup-label">Lokasi:</div>
+                <div class="popup-value">${lokasi}</div>
+                <div class="popup-label">Cost Center:</div>
+                <div class="popup-value">${cc}</div>
+                <div class="popup-label">Kondisi:</div>
+                <div class="popup-value">${kondisi}</div>
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank">
+                  📍 Arahkan ke Lokasi
+                </a><br>
+                ${photoLinks}
+              </div>
+            `;
+            marker.bindPopup(popupContent);
+          }
+        });
+
+        summaryContent.innerHTML += `<div class="dashboard-item"><b>Total Aset: ${total}</b></div>`;
+        Object.entries(summary).forEach(([key, count]) => {
+          const color = getMarkerColor(key);
+          summaryContent.innerHTML += `
+            <div class="dashboard-item">
+              <span class="color-box" style="background:${color}"></span> ${key}: <b>${count}</b>
+            </div>
+          `;
+        });
+
+        if (total === 0) {
+          summaryContent.innerHTML = "<div>Tidak ada aset dalam radius 1 km.</div>";
+        }
+      })
+      .catch(err => {
+        console.error("❌ Gagal fetch nearby:", err);
+        alert("Gagal mengambil data aset sekitar.");
+      });
+  </script>
+</body>
+</html>
