@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Asset Near Me</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 100vh; }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    .popup-box { font-size: 14px; color: #333; }
+    .popup-label { font-weight: bold; color: #666; }
+    .popup-value { margin-bottom: 6px; display: block; }
+    .popup-box a {
+      display: inline-block; margin-top: 6px; padding: 6px 10px;
+      background: #0b5394; color: white; border-radius: 4px;
+      text-decoration: none; font-weight: bold;
+    }
+
+    .dashboard {
+      position: absolute; top: 10px; left: 10px;
+      background: white; padding: 10px 14px;
+      border-radius: 8px; box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+      font-size: 13px; z-index: 999;
+      max-width: 95vw; max-height: 95vh;
+      overflow-y: auto;
+    }
+
+    .section-header {
+      font-weight: bold; font-size: 15px;
+      cursor: pointer; margin-bottom: 6px;
+      border-bottom: 1px solid #ccc; padding-bottom: 4px;
+    }
+
+    .section-body { margin-bottom: 12px; }
+
+    .dashboard-content {
+      display: flex; flex-wrap: wrap; gap: 10px;
+    }
+
+    .dashboard-item {
+      background: #f0f0f0; padding: 4px 8px;
+      border-radius: 4px; display: flex;
+      align-items: center;
+    }
+
+    .color-box {
+      display: inline-block; width: 10px; height: 10px;
+      margin-right: 6px; border: 1px solid #999;
+    }
+
+    .legend {
+      margin-top: 10px; display: flex;
+      flex-wrap: wrap; gap: 8px;
+    }
+
+    .legend-item { font-size: 12px; }
+
+    .filter-group { margin-bottom: 10px; }
+    .filter-group-title { font-weight: bold; margin-bottom: 4px; }
+
+    .filter-buttons { margin-bottom: 6px; }
+    .filter-buttons button {
+      margin-right: 6px; font-size: 12px;
+      padding: 2px 6px;
+    }
+
+    .filter-search {
+      width: 100%; margin-bottom: 4px; padding: 4px;
+      font-size: 12px; border: 1px solid #ccc; border-radius: 4px;
+    }
+
+    .custom-suggestion {
+      position: absolute;
+      background: white;
+      border: 1px solid #ccc;
+      z-index: 1000;
+      font-size: 12px;
+      max-height: 120px;
+      overflow-y: auto;
+      width: 90%;
+      box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    }
+
+    .custom-suggestion div {
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+
+    .custom-suggestion div:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="dashboard">
+    <!-- Ringkasan Aset -->
+    <div>
+      <div class="section-header" onclick="toggleSection('summarySection')">📊 Ringkasan Aset</div>
+      <div id="summarySection" class="section-body">
+        <div class="dashboard-content" id="summaryContent">Memuat data...</div>
+        <div class="legend">
+          <div class="legend-item"><span class="color-box" style="background:green"></span> Digunakan</div>
+          <div class="legend-item"><span class="color-box" style="background:red"></span> Rusak Berat</div>
+          <div class="legend-item"><span class="color-box" style="background:yellow"></span> Rusak Ringan</div>
+          <div class="legend-item"><span class="color-box" style="background:deepskyblue"></span> Diperbaiki</div>
+          <div class="legend-item"><span class="color-box" style="background:orange"></span> Cadangan</div>
+          <div class="legend-item"><span class="color-box" style="background:gray"></span> Penghapusan</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter Aset -->
+    <div>
+      <div class="section-header" onclick="toggleSection('filterSection')">🎛️ Filter Aset</div>
+      <div id="filterSection" class="section-body">
+        
+        <!-- Filter: Kondisi -->
+        <div class="filter-group">
+          <div class="filter-group-title">Kondisi:</div>
+          <input class="filter-search" id="conditionSearch" placeholder="Ketik untuk cari kondisi..." list="conditionList"
+                 oninput="showSuggestions('condition')">
+          <datalist id="conditionList"></datalist>
+          <div id="conditionSuggest" class="custom-suggestion" style="display:none;"></div>
+          <div class="filter-buttons">
+            <button onclick="toggleAll('condition', true)">Pilih Semua</button>
+            <button onclick="toggleAll('condition', false)">Kosongkan</button>
+          </div>
+          <div id="conditionFilters"></div>
+        </div>
+
+        <!-- Filter: Cost Center -->
+        <div class="filter-group">
+          <div class="filter-group-title">Cost Center:</div>
+          <input class="filter-search" id="ccSearch" placeholder="Ketik untuk cari cost center..." list="ccList"
+                 oninput="showSuggestions('cc')">
+          <datalist id="ccList"></datalist>
+          <div id="ccSuggest" class="custom-suggestion" style="display:none;"></div>
+          <div class="filter-buttons">
+            <button onclick="toggleAll('cc', true)">Pilih Semua</button>
+            <button onclick="toggleAll('cc', false)">Kosongkan</button>
+          </div>
+          <div id="ccFilters"></div>
+        </div>
+
+      </div>
+    </div>
+  </div> <!-- Penutup dashboard -->
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const userLat = parseFloat(urlParams.get("lat"));
+    const userLng = parseFloat(urlParams.get("lng"));
+
+    const map = L.map('map', { zoomControl: false }).setView([userLat, userLng], 16);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 22,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Lingkaran 1 KM dan marker user
+    L.circle([userLat, userLng], {
+      radius: 1000,
+      color: 'blue',
+      fillOpacity: 0.08
+    }).addTo(map);
+
+    const userIcon = L.divIcon({ html: '🧍‍♂️', className: '', iconSize: [28, 28] });
+    L.marker([userLat, userLng], { icon: userIcon }).addTo(map).bindPopup('<b>Lokasi Anda</b>').openPopup();
+
+    let allAssets = [];
+    const allMarkers = [];
+
+    function toTitleCase(str) {
+      return str.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+    }
+
+    function toggleSection(id) {
+      const el = document.getElementById(id);
+      el.style.display = el.style.display === "none" ? "block" : "none";
+    }
+
+    function getMarkerColor(condition) {
+  switch ((condition || "").toLowerCase()) {
+    case 'digunakan': return 'green';
+    case 'rusak berat': return 'red';
+    case 'rusak ringan': return 'yellow';
+    case 'diperbaiki': return 'deepskyblue';
+    case 'cadangan': return 'orange';
+    case 'penghapusan': return 'gray';
+    default: return 'black'; // Kondisi tidak ditemukan atau kosong
+  }
+}
+
+    function createColoredIcon(color) {
+      return new L.Icon({
+        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        iconSize: [18, 30],
+        iconAnchor: [9, 30],
+        popupAnchor: [1, -28],
+        shadowSize: [30, 30]
+      });
+    }
+
+    function updateFiltersOptions(data) {
+      const condSet = new Set();
+      const ccSet = new Set();
+
+      data.forEach(a => {
+        if (a.condition) condSet.add(toTitleCase(a.condition));
+        if (a.cost_center) ccSet.add(a.cost_center);
+      });
+
+      const condFilter = document.getElementById("conditionFilters");
+      const ccFilter = document.getElementById("ccFilters");
+      const condList = document.getElementById("conditionList");
+      const ccList = document.getElementById("ccList");
+
+      condFilter.innerHTML = ""; condList.innerHTML = "";
+      ccFilter.innerHTML = ""; ccList.innerHTML = "";
+
+      [...condSet].sort().forEach(val => {
+        condFilter.innerHTML += `<label><input type="checkbox" class="filter-condition" value="${val}" checked> ${val}</label>`;
+        condList.innerHTML += `<option value="${val}">`;
+      });
+
+      [...ccSet].sort().forEach(val => {
+        ccFilter.innerHTML += `<label><input type="checkbox" class="filter-cc" value="${val}" checked> ${val}</label>`;
+        ccList.innerHTML += `<option value="${val}">`;
+      });
+    }
+
+    function toggleAll(type, checked) {
+      const selector = type === 'condition' ? '.filter-condition' : '.filter-cc';
+      document.querySelectorAll(selector).forEach(cb => cb.checked = checked);
+      applyFilters();
+    }
+
+    function showSuggestions(type) {
+      const input = document.getElementById(type === 'condition' ? "conditionSearch" : "ccSearch");
+      const suggestBox = document.getElementById(type === 'condition' ? "conditionSuggest" : "ccSuggest");
+      const value = input.value.toLowerCase();
+      const checkboxes = document.querySelectorAll(type === 'condition' ? ".filter-condition" : ".filter-cc");
+
+      suggestBox.innerHTML = "";
+      suggestBox.style.display = "none";
+
+      if (value.length < 3) return;
+
+      const matches = Array.from(checkboxes).filter(cb => cb.value.toLowerCase().includes(value));
+      if (matches.length === 0) return;
+
+      matches.forEach(cb => {
+        const div = document.createElement("div");
+        div.textContent = cb.value;
+        div.onclick = () => {
+          checkboxes.forEach(c => c.checked = false);
+          cb.checked = true;
+          applyFilters();
+          suggestBox.style.display = "none";
+        };
+        suggestBox.appendChild(div);
+      });
+
+      const rect = input.getBoundingClientRect();
+      suggestBox.style.left = `${rect.left}px`;
+      suggestBox.style.top = `${rect.bottom + window.scrollY}px`;
+      suggestBox.style.display = "block";
+    }
+
+    function applyFilters() {
+      const selectedConds = Array.from(document.querySelectorAll('.filter-condition:checked')).map(i => i.value);
+      const selectedCCs = Array.from(document.querySelectorAll('.filter-cc:checked')).map(i => i.value);
+
+      allMarkers.forEach(m => map.removeLayer(m));
+      const summaryContent = document.getElementById("summaryContent");
+      summaryContent.innerHTML = "";
+      let total = 0;
+      const summary = {};
+
+      allAssets.forEach(asset => {
+        const kondisi = toTitleCase(asset.condition || "-");
+        const cc = asset.cost_center || "-";
+
+        if (!selectedConds.includes(kondisi) || !selectedCCs.includes(cc)) return;
+
+        total++;
+        summary[kondisi] = (summary[kondisi] || 0) + 1;
+
+        const lat = parseFloat(asset.latitude);
+        const lng = parseFloat(asset.longitude);
+        const name = asset.asset_name || "No Name";
+        const lokasi = asset.location || "-";
+        const color = getMarkerColor(asset.condition);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const marker = L.marker([lat, lng], {
+            icon: createColoredIcon(color)
+          });
+
+          const photoLinks = Object.keys(asset)
+            .filter(k => k.startsWith("photo_link") && asset[k])
+            .map(link => `<a href="${asset[link]}" target="_blank">📸 Lihat Foto</a>`).join("<br>");
+
+          marker.bindPopup(`
+            <div class="popup-box">
+              <div class="popup-label">Nama Aset:</div>
+              <div class="popup-value"><b>${name}</b></div>
+              <div class="popup-label">Lokasi:</div>
+              <div class="popup-value">${lokasi}</div>
+              <div class="popup-label">Cost Center:</div>
+              <div class="popup-value">${cc}</div>
+              <div class="popup-label">Kondisi:</div>
+              <div class="popup-value">${kondisi}</div>
+              <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank">
+                📍 Arahkan ke Lokasi
+              </a><br>
+              ${photoLinks}
+            </div>
+          `);
+
+          marker.addTo(map);
+          allMarkers.push(marker);
+        }
+      });
+
+      summaryContent.innerHTML += `<div class="dashboard-item"><b>Total Aset: ${total}</b></div>`;
+      Object.entries(summary).forEach(([key, count]) => {
+        const color = getMarkerColor(key);
+        summaryContent.innerHTML += `
+          <div class="dashboard-item">
+            <span class="color-box" style="background:${color}"></span> ${key}: <b>${count}</b>
+          </div>
+        `;
+      });
+
+      if (total === 0) {
+        summaryContent.innerHTML = "<div>Tidak ada aset sesuai filter.</div>";
+      }
+    }
+
+    fetch(`https://asset-api-ef1w.onrender.com/nearme?lat=${userLat}&lng=${userLng}`)
+      .then(res => res.json())
+      .then(data => {
+        allAssets = data;
+        updateFiltersOptions(data);
+        applyFilters();
+        document.querySelectorAll('.filter-condition, .filter-cc').forEach(cb => {
+          cb.addEventListener('change', applyFilters);
+        });
+      })
+      .catch(err => {
+        console.error("❌ Gagal fetch nearby:", err);
+        alert("Gagal mengambil data aset sekitar.");
+      });
+  </script>
+</body>
+</html>
